@@ -1,0 +1,176 @@
+# =========================================================
+# 台股當沖即時監控系統 — 全域可調參數
+# 所有「寫死」的規則都應該從這裡讀，不要改程式碼
+# =========================================================
+
+# ---------- 資料來源 ----------
+data_source:
+  provider: fugle
+  fugle:
+    api_token: ""   # 不要填在這裡！本機填 config/secrets.yaml，雲端設 GitHub Secrets 的 FUGLE_API_TOKEN
+  poll_interval_sec: 1
+  index_poll_interval_sec: 15   # 大盤指數多久更新一次（秒）。每次都會用掉1次REST額度，太頻繁會拖慢全市場掃描
+
+# ---------- 觀察股票池 ----------
+universe:
+  # 手動固定追蹤清單。這裡留空 = 完全交給下面的全市場自動掃描（scan）決定要追蹤誰，
+  # 每次啟動/每一輪掃描都會依當下的成交額與波動幅度，從全台股裡重新選出前N名候選。
+  # 如果你想要「這幾檔一定要追蹤，掃描結果是額外加開的」，才把代碼填回這裡，
+  # 例如： - "2330"   # 台積電（一定要看）
+  watchlist: []
+  # 股票代碼 -> 中文名稱備援表。真實API（富果）通常會直接回傳名稱，這裡主要給
+  # mock 模式，或當來源沒回傳名稱時當備援；掃描到的新候選會自動補進這個表。
+  stock_names:
+    "2408": "南亞科"
+    "2454": "聯發科"
+    "2330": "台積電"
+    "3037": "欣興"
+    "2036": "世界"
+  auto_scan: true             # 是否自動掃描全市場找候選（僅 provider=fugle 時生效，mock模式忽略）
+  exclude_etf: true
+  exclude_financial_supervision: true   # 排除處置股
+  exclude_short_sale_restricted: false  # 是否排除禁空限制股（當沖多方不受影響，空方需注意）
+  price_range:
+    min: 10
+    max: 2000
+  min_market_cap_billion: 0    # 0 = 不限
+
+  # ---- 全市場自動掃描（第一層：REST輪詢全市場，篩出候選；第二層：WebSocket即時追蹤候選）----
+  # 免費方案限制：60次/分鐘 REST 呼叫、5檔 WebSocket 訂閱／1連線。
+  # 這裡的預設值是「假設你還沒升級付費方案」下的保守設定，之後升級可以直接調大。
+  scan:
+    enabled: true                    # 開關（auto_scan 也要為 true 才會真正啟用）
+    rest_calls_per_minute: 50        # 留多一點餘裕，實測發現富果除了每分鐘總量限制，
+                                      # 短時間內太密集也會被擋（429），所以呼叫時是平均分散
+                                      # 間隔（60/50=1.2秒一次），不是衝到額度滿才等
+    shortlist_size: 100              # 先用證交所/櫃買官方「前一交易日成交額排行」挑前N檔，Fugle只逐檔掃這N檔
+                                      # （100檔 ≈ 2分鐘一輪；調大較不會漏掉今天才爆量的股票，但每輪較久；0 = 逐檔掃全市場，約20-30分鐘）
+                                      # 開盤前也會直接用這份排行當候選，09:00 起就開始即時追蹤
+    first_scan_delay_minutes: 3      # 開盤後幾分鐘做第一輪正式掃描（太早成交額還沒累積，排不出來）
+    scan_interval_minutes: 5         # 每一輪掃完後，隔多久重新掃一次
+    ticker_list_refresh_hours: 6     # 全市場代碼清單（intraday/tickers）多久重抓一次，代碼清單變動很少不用常抓
+    top_n_candidates: 5              # 掃完後取分數最高的前N檔，交給WebSocket即時追蹤
+                                      # 免費方案WebSocket訂閱上限是5，這裡預設抓到滿；付費方案可調大
+    max_websocket_subscriptions: 5   # 對應方案的訂閱數上限，用來保護不要超額被拒絕
+    min_turnover_billion_for_scan: 1 # 掃描階段的成交額初篩門檻（比 liquidity.min_turnover_billion 寬鬆，
+                                      # 避免一開盤成交額還沒累積起來就被刷掉，正式評分仍用 liquidity 門檻）
+
+# ---------- 族群分類（可自行增減成分股）----------
+groups:
+  半導體: ["2330", "2303", "5347"]
+  記憶體: ["2408", "3260", "2344", "8299"]
+  PCB: ["3037", "2383", "6274"]
+  載板: ["3037", "8046", "2383"]
+  被動元件: ["2327", "2492"]
+  散熱: ["3017", "2421"]
+  AI伺服器: ["2382", "3231", "2317"]
+  金融: ["2881", "2882", "2891"]
+  航運: ["2603", "2609", "2615"]
+
+# ---------- 第一波高低點觀察區間 ----------
+first_range:
+  start_time: "09:00"
+  duration_minutes: 10        # 可改 5 / 10 / 15，形成「第一觀察區間」
+  # 突破/跌破需要的最小站穩時間，避免單一tick雜訊誤判
+  confirm_hold_seconds: 30
+  # 突破/跌破幅度門檻（超過第一高/低多少% 才算「有效突破」而非雜訊）
+  breakout_min_pct: 0.3
+  # 突破後「立刻跌回區間」判定秒數：突破後 N 秒內跌回視為假突破嫌疑
+  fakeout_check_seconds: 90
+  # 晚開／重開／掃描中途才加入的股票，開始追蹤時抓當日1分K補回觀察區間的真正第一高低，
+  # 以及已經走完的K棒（MA5/20/60 不用重新累積）
+  # （每檔用1次REST額度；09:00前就開始追蹤的不會補，也不花額度）。關掉 = 只靠即時報價
+  backfill_from_candles: true
+
+# ---------- 技術指標 ----------
+indicators:
+  ma_periods: [5, 20, 60]      # MA 參數，皆用 1 分K 計算
+  bar_intervals_min: [1, 5]     # 產生的K棒週期
+  volume_avg_lookback_min: 5    # 「近5分鐘均量」的 lookback
+
+# ---------- 量能 / 流動性門檻 ----------
+liquidity:
+  min_turnover_billion: 5        # 成交額門檻（億元）：>5億 / >10億 / >20億 可自行切換
+  turnover_score_breakpoints:    # 成交額 -> 得分對照表（流動性 20分中的一部分）
+    - {min: 20, score: 20}
+    - {min: 10, score: 15}
+    - {min: 5,  score: 10}
+    - {min: 2,  score: 5}
+    - {min: 0,  score: 0}
+
+volume:
+  ratio_vs_yesterday_thresholds:   # 今日量比昨日同期 倍數對照表
+    - {min: 3.0, score: 20}
+    - {min: 2.0, score: 15}
+    - {min: 1.5, score: 10}
+    - {min: 1.2, score: 5}
+    - {min: 0,   score: 0}
+
+# ---------- 相對強弱 ----------
+relative_strength:
+  index_symbol: "TAIEX"          # 大盤代號
+  strong_threshold_pct: 1.0      # 個股相對大盤 >= +1% 視為「相對強勢」
+  weak_threshold_pct: -1.0       # 個股相對大盤 <= -1% 視為「相對弱勢」
+
+# ---------- 突破品質評分 ----------
+breakout_quality:
+  volume_multiple_good: 1.8      # 突破當根K棒量 / 近5分鐘均量 >= 此值 -> 加分
+  distance_to_prior_high_warn_pct: 2.0   # 距離昨日高點/整數關卡 <= 此% 視為壓力接近，扣分
+  group_sync_required: true      # 是否要求同族群同步才算高品質突破
+  index_sync_required: true      # 是否要求大盤同步
+
+# ---------- 追價風險（乖離率）----------
+chase_risk:
+  ma5_deviation_warn_pct: 3.0     # 現價乖離 MA5 超過此% -> 追價風險扣分
+  ma5_deviation_danger_pct: 5.0
+
+# ---------- 當沖分數五大構面權重（總分100）----------
+score_weights:
+  liquidity: 20
+  trend: 20
+  volume: 20
+  relative_strength: 20
+  breakout_quality: 20
+
+# ---------- 漲跌停 ----------
+limit:
+  limit_up_pct: 10.0
+  limit_down_pct: 10.0
+  near_limit_warn_pct: 1.0        # 距漲跌停 <= 1% 提出警示（流動性風險）
+
+# ---------- 網頁 / 展示 ----------
+display:
+  top_n_long: 10
+  top_n_short: 10
+  refresh_sec: 3
+  alert_score_threshold: 80        # 訊號分數 >= 此值才進警報欄
+
+# ---------- 關注提醒（符合條件時跳出桌面通知＋頁面彈窗＋音效）----------
+# 儀表板要開著，並按一次頁面上方的「啟用提醒」。改這裡不用重開系統，3 秒內生效。
+# 同一檔股票、同一個劇本，一天只提醒一次；換成另一個符合的劇本會再提醒。
+watch_alert:
+  enabled: true
+  # 可用劇本：強勢突破、V型反轉、跌深反彈（多方）｜破低續殺、反彈空、開高走低（空方）｜假突破、開低築底、箱型震盪
+  scenarios: ["強勢突破", "V型反轉", "跌深反彈"]
+  min_score: 70                    # 劇本方向的分數（多方劇本看多方分數、空方看空方分數）≥ 此值才提醒
+
+# ---------- Telegram 機器人（推播關注提醒 + 指令查詢）----------
+# Bot Token / chat_id 屬於金鑰，不寫在這裡：本機填 config/secrets.yaml，
+# 雲端設 GitHub Secrets 的 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID。沒設 Token 就不啟動機器人。
+# 推播條件沿用上面的 watch_alert（劇本 + 分數門檻），同一檔同一劇本一天只推一次。
+telegram:
+  enabled: true
+  push_watch_alerts: true          # 符合 watch_alert 條件時主動推播
+  top_n: 5                         # /top 指令多方、空方各列幾檔
+
+# ---------- 雲端執行（GitHub Actions，cloud_run.py）----------
+# workflow 會提早啟動（GitHub 排程常延遲），程式等到 start_time 才開始連線，stop_time 自動結束。
+cloud:
+  start_time: "08:45"
+  stop_time: "13:35"
+  skip_holidays: true              # 依證交所休市日曆，休市日直接結束（查不到日曆時照常執行）
+
+# ---------- 盤後回測 / 檢討 ----------
+review:
+  run_after_time: "13:30"
+  save_dir: "review/logs"

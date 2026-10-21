@@ -1,0 +1,13 @@
+# 金鑰：絕對不要上傳
+config/secrets.yaml
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 執行期產生的檔案（自選股 data/user_watchlist.json 要保留，雲端靠它跨日記住 /add 的股票）
+data/scan_cache.json
+review/logs/

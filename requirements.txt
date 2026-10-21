@@ -1,0 +1,9 @@
+pyyaml>=6.0
+fastapi>=0.110
+uvicorn>=0.29
+tzdata>=2024.1   # Windows 沒有內建IANA時區資料庫，zoneinfo需要這個套件才能找到 Asia/Taipei
+
+fugle-marketdata>=2.0   # 富果即時行情API（provider設為fugle時使用，設為mock時裝了也沒差）
+requests>=2.28          # 抓證交所/櫃買官方前一交易日行情（全市場掃描縮小範圍用；fugle-marketdata本來就會裝）
+# 選用：若要讓 AI 解讀層改用 Claude 潤飾文字（非必要，預設用規則式模板）
+# anthropic>=0.34

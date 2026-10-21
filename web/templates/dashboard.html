@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f1115">
+<title>台股當沖即時監控</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #171a21; --border: #2a2e37;
+    --text: #e6e8ec; --muted: #8a8f9a;
+    --red: #ff5b5b; --green: #2ecc71; --yellow: #f5c542;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: "Noto Sans TC", "PingFang TC", sans-serif; margin:0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .summary { background: var(--card); border:1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; }
+  .summary .row { display:flex; gap: 24px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+  .summary b { color: var(--text); }
+  .cols { display:flex; gap: 14px; align-items: flex-start; }
+  .col { flex:1; background: var(--card); border:1px solid var(--border); border-radius: 10px; padding: 10px; min-width: 0; }
+  .col h2 { font-size: 14px; margin: 4px 8px 10px; color: var(--muted); }
+  .card { border:1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px; font-size: 13px; line-height: 1.55; }
+  .card.long { border-left: 3px solid var(--green); }
+  .card.short { border-left: 3px solid var(--red); }
+  .card .top-row { display:flex; justify-content: space-between; font-weight: 600; }
+  .sym { color: var(--text); }
+  .chg-up { color: var(--red); }   /* 台股慣例：紅漲綠跌 */
+  .chg-down { color: var(--green); }
+  .badge { display:inline-block; background:#232733; border-radius:4px; padding:1px 6px; font-size:11px; color:var(--muted); margin-right:4px;}
+  .scenario-tag { font-weight:600; color: var(--yellow); }
+  .scores { display:flex; gap:12px; margin-top:4px; font-size:12px; color: var(--muted); }
+  .alert-card { border-left: 3px solid var(--yellow); }
+  .group-row { display:flex; justify-content:space-between; font-size:12px; padding:3px 8px; color: var(--muted); }
+  .narrative { color: var(--muted); font-size:12px; margin-top:4px; }
+  #groups { margin-top: 14px; }
+  .empty { color: var(--muted); font-size: 12px; padding: 10px; }
+
+  /* ---------- 關注提醒 ---------- */
+  .alert-bar { display:flex; align-items:center; gap:12px; margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+  .alert-bar button { background: var(--yellow); color:#1a1a1a; border:0; border-radius:6px; padding:6px 14px; font-weight:700; cursor:pointer; font-size:13px; }
+  .alert-bar button.on { background:#232733; color: var(--green); cursor:pointer; }
+  .alert-bar .warn { color: var(--yellow); }
+  #watch-modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:100; padding:16px; }
+  #watch-modal.show { display:flex; }
+  #watch-modal .box { background: var(--card); border:2px solid var(--yellow); border-radius:12px; width:min(560px,100%); max-height:85vh; overflow:auto; padding:16px 18px; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  #watch-modal h3 { margin:0 0 6px; color: var(--yellow); font-size:17px; }
+  #watch-modal .box > .hint { color: var(--muted); font-size:12px; margin-bottom:6px; }
+  #watch-modal .card { margin: 10px 0; }
+  #watch-modal .time { color: var(--muted); font-size:11px; font-weight:400; }
+  /* ---------- 自選股面板 ---------- */
+  .watch-panel { background: var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 16px; margin-bottom:16px; }
+  .watch-panel form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .watch-panel input { background:#0b0d11; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:7px 10px; font-size:14px; width:200px; }
+  .watch-panel input:focus { outline:none; border-color: var(--yellow); }
+  .watch-panel button { background: var(--yellow); color:#1a1a1a; border:0; border-radius:6px; padding:7px 14px; font-weight:700; cursor:pointer; font-size:13px; }
+  .watch-panel button:disabled { opacity:.5; cursor:wait; }
+  .watch-panel .slot-info { color: var(--muted); font-size:12px; }
+  #add-msg { font-size:12px; margin-top:6px; min-height:16px; }
+  #add-msg.ok { color: var(--green); } #add-msg.err { color: var(--red); }
+  #chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; background:#232733; border-radius:14px; padding:3px 6px 3px 10px; font-size:12px; }
+  .chip .x { background:none; border:0; color: var(--muted); cursor:pointer; font-size:14px; padding:0 4px; line-height:1; }
+  .chip .x:hover { color: var(--red); }
+  .chip .src { color: var(--muted); font-size:11px; padding-right:4px; }
+  #pinned-section { margin-bottom:16px; }
+  #pinned-list { display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .pin { color: var(--yellow); }
+  #watch-modal .ok { display:block; width:100%; margin-top:12px; background: var(--yellow); color:#1a1a1a; border:0; border-radius:8px; padding:10px; font-size:15px; font-weight:700; cursor:pointer; }
+  /* ---------- 手機版（寬度 ≤ 768px）---------- */
+  @media (max-width: 768px) {
+    body { padding: 10px; }
+    h1 { font-size: 16px; }
+    /* 三欄改成上下排，警報移到最上面（手機上最需要先看到的） */
+    .cols { flex-direction: column; gap: 10px; }
+    .col { width: 100%; padding: 6px; }
+    .cols .col:last-child { order: -1; }
+    .card { margin: 6px 4px; }
+    .card .top-row { flex-wrap: wrap; gap: 2px 8px; }
+    .group-row { flex-wrap: wrap; gap: 0 8px; }
+    .summary { padding: 10px 12px; }
+    .summary .row { gap: 6px 16px; }
+    .alert-bar { flex-wrap: wrap; gap: 6px 10px; }
+    .alert-bar button { padding: 10px 16px; font-size: 15px; }
+    .watch-panel { padding: 10px 12px; }
+    /* 16px 以上 iOS 點輸入框才不會自動放大畫面 */
+    .watch-panel input { flex: 1; min-width: 0; width: auto; font-size: 16px; padding: 10px; }
+    .watch-panel button { padding: 10px 16px; font-size: 15px; }
+    .chip .x { font-size: 18px; padding: 2px 8px; }
+    #pinned-list { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <h1>台股當沖即時監控 ・ 候選排序 ・ 劇本辨識</h1>
+  <div class="alert-bar">
+    <button id="enable-alert" type="button">🔔 啟用提醒</button>
+    <span id="alert-status" class="warn">尚未啟用：按一下才會有桌面通知和提示音（每次打開儀表板都要按一次）</span>
+  </div>
+  <div class="watch-panel">
+    <form id="add-form" autocomplete="off">
+      <input id="add-input" placeholder="輸入股票代號，例如 2330" maxlength="6" inputmode="numeric" aria-label="股票代號">
+      <button id="add-btn" type="submit">📌 加入自選</button>
+      <span class="slot-info" id="slot-info"></span>
+    </form>
+    <div id="add-msg" role="status"></div>
+    <div id="chips"></div>
+  </div>
+
+  <div class="col" id="pinned-section" hidden>
+    <h2>📌 我的自選（一樣套用劇本／多空分數／關注提醒條件）</h2>
+    <div id="pinned-list"></div>
+  </div>
+
+  <div class="summary">
+    <div class="row">
+      <div>今日市場：<b id="market-label">-</b>（加權指數 <b id="market-chg">-</b>）</div>
+      <div>最佳多方：<b id="best-long">-</b> 檔</div>
+      <div>最佳空方：<b id="best-short">-</b> 檔</div>
+      <div>更新時間：<b id="updated-at">-</b></div>
+    </div>
+    <div id="groups"></div>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <h2>🟢 多方 TOP 10</h2>
+      <div id="long-list"></div>
+    </div>
+    <div class="col">
+      <h2>🔴 空方 TOP 10</h2>
+      <div id="short-list"></div>
+    </div>
+    <div class="col">
+      <h2>⚠️ 警報（分數 ≥ 門檻）</h2>
+      <div id="alert-list"></div>
+    </div>
+  </div>
+
+  <div id="watch-modal" role="dialog" aria-modal="true" aria-labelledby="watch-title">
+    <div class="box">
+      <h3 id="watch-title">🔔 符合關注條件</h3>
+      <div class="hint">以下股票的劇本與分數符合你在 config/settings.yaml 設定的 watch_alert 條件</div>
+      <div id="watch-list"></div>
+      <button class="ok" id="watch-ok" type="button">知道了</button>
+    </div>
+  </div>
+
+<script>
+function fmtPct(v) {
+  if (v === null || v === undefined) return "N/A";
+  const cls = v > 0 ? "chg-up" : (v < 0 ? "chg-down" : "");
+  const sign = v > 0 ? "+" : "";
+  return `<span class="${cls}">${sign}${v.toFixed(2)}%</span>`;
+}
+
+function card(s, direction) {
+  const score = direction === "long" ? s.long_score : s.short_score;
+  const otherScore = direction === "long" ? s.short_score : s.long_score;
+  return `
+    <div class="card ${direction}">
+      <div class="top-row">
+        <span class="sym">${s.pinned ? '<span class="pin" title="自選股">📌</span> ' : ""}${s.symbol} ${s.name}</span>
+        <span>${s.price}　${fmtPct(s.change_pct)}</span>
+      </div>
+      <div>成交額 ${s.turnover_billion}億　量比昨同期 ${s.volume_ratio_vs_yesterday ? s.volume_ratio_vs_yesterday + "X" : "N/A"}　量能 ${s.volume_multiple_recent}X　相對大盤 ${fmtPct(s.relative_strength_pct)}</div>
+      <div>第一高 ${s.first_high ?? "N/A"}　第一低 ${s.first_low ?? "N/A"}</div>
+      <div class="scenario-tag">劇本：${s.scenario}</div>
+      <div class="badge">訊號 ${s.signals}</div>
+      <div class="scores">
+        <span>多方 ${s.long_score}</span><span>空方 ${s.short_score}</span>
+      </div>
+      <div class="narrative">${s.narrative}</div>
+    </div>
+  `;
+}
+
+async function refresh() {
+  const res = await fetch("/api/ranking");
+  const data = await res.json();
+
+  document.getElementById("market-label").textContent = data.market.label;
+  document.getElementById("market-chg").innerHTML = fmtPct(data.market.index_change_pct);
+  document.getElementById("best-long").textContent = data.summary.best_long_count;
+  document.getElementById("best-short").textContent = data.summary.best_short_count;
+  document.getElementById("updated-at").textContent = data.market.updated_at ? new Date(data.market.updated_at).toLocaleTimeString() : "-";
+
+  const groupsHtml = data.group_strength.slice(0, 6).map(g =>
+    `<div class="group-row"><span>#${g.rank} ${g.group}</span><span>${fmtPct(g.avg_change_pct)}　領漲:${g.leader?.symbol ?? "-"} / 掉隊:${g.laggard?.symbol ?? "-"}</span></div>`
+  ).join("");
+  document.getElementById("groups").innerHTML = groupsHtml;
+
+  const hasData = data.long_top.length + data.short_top.length > 0;
+  document.getElementById("long-list").innerHTML = data.long_top.length
+    ? data.long_top.map(s => card(s, "long")).join("")
+    : `<div class="empty">${hasData ? "目前追蹤中沒有偏多的股票" : "尚無資料"}</div>`;
+  document.getElementById("short-list").innerHTML = data.short_top.length
+    ? data.short_top.map(s => card(s, "short")).join("")
+    : `<div class="empty">${hasData ? "目前追蹤中沒有偏空的股票（每檔只列在分數較高的那一欄）" : "尚無資料"}</div>`;
+  document.getElementById("alert-list").innerHTML = data.alerts.length
+    ? data.alerts.map(s => card(s, s.long_score >= s.short_score ? "long" : "short")).join("")
+    : '<div class="empty">目前無高分警報</div>';
+
+  latestRows = Object.fromEntries([...data.long_top, ...data.short_top, ...(data.pinned || [])].map(s => [s.symbol, s]));
+  renderPinned(data.pinned || []);
+  renderChips();
+  handleWatchHits(data.watch_hits || []);
+}
+
+/* ---------- 自選股：輸入代號加入，跟其他股票一樣套用劇本／分數／關注提醒 ---------- */
+let watchInfo = { user: [], config: [], max: 5 };
+let latestRows = {};
+
+function renderPinned(rows) {
+  const section = document.getElementById("pinned-section");
+  const pinnedCount = watchInfo.user.length + watchInfo.config.length;
+  section.hidden = pinnedCount === 0;
+  const waiting = [...watchInfo.config, ...watchInfo.user]
+    .filter(sym => !rows.some(r => r.symbol === sym))
+    .map(sym => `<div class="card"><span class="sym">📌 ${sym}</span><div class="empty">等待第一筆報價…</div></div>`);
+  document.getElementById("pinned-list").innerHTML =
+    rows.map(s => card(s, s.long_score >= s.short_score ? "long" : "short")).join("") + waiting.join("");
+}
+
+function renderChips() {
+  const chip = (sym, removable) => {
+    const name = latestRows[sym]?.name ?? "";
+    return `<span class="chip">${sym} ${name}` + (removable
+      ? `<button class="x" type="button" data-sym="${sym}" title="移除 ${sym}" aria-label="移除 ${sym}">×</button>`
+      : `<span class="src" title="寫在 config/settings.yaml 的 watchlist">設定檔</span>`) + `</span>`;
+  };
+  document.getElementById("chips").innerHTML =
+    watchInfo.config.map(s => chip(s, false)).join("") + watchInfo.user.map(s => chip(s, true)).join("");
+  const used = watchInfo.user.length + watchInfo.config.length;
+  document.getElementById("slot-info").textContent =
+    `自選 ${used} / ${watchInfo.max} 檔（即時訂閱名額，剩下的給全市場掃描候選）`;
+}
+
+async function loadWatchlist() {
+  try {
+    const res = await fetch("/api/watchlist");
+    if (res.ok) watchInfo = await res.json();
+  } catch (e) { /* 讀不到就維持上次的顯示 */ }
+  renderChips();
+}
+
+function showMsg(text, ok) {
+  const el = document.getElementById("add-msg");
+  el.textContent = text;          // 用 textContent，使用者輸入的內容不會被當成 HTML
+  el.className = ok ? "ok" : "err";
+}
+
+document.getElementById("add-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const input = document.getElementById("add-input");
+  const btn = document.getElementById("add-btn");
+  const symbol = input.value.trim();
+  if (!symbol) return;
+  btn.disabled = true;
+  showMsg(`查詢 ${symbol} 中…`, true);
+  try {
+    const res = await fetch("/api/watchlist", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol }),
+    });
+    const data = await res.json();
+    showMsg(data.message, data.ok);
+    if (data.ok) input.value = "";
+  } catch (e) {
+    showMsg("加入失敗：連不到後端，請確認系統還在執行", false);
+  }
+  btn.disabled = false;
+  await loadWatchlist();
+  refresh();
+});
+
+document.getElementById("chips").addEventListener("click", async (ev) => {
+  const sym = ev.target.dataset?.sym;
+  if (!sym) return;
+  try {
+    const res = await fetch(`/api/watchlist/${encodeURIComponent(sym)}`, { method: "DELETE" });
+    const data = await res.json();
+    showMsg(data.message, data.ok);
+  } catch (e) {
+    showMsg("移除失敗：連不到後端，請確認系統還在執行", false);
+  }
+  await loadWatchlist();
+  refresh();
+});
+
+/* ---------- 關注提醒：桌面通知 + 頁面彈窗 + 音效 ----------
+   條件由後端依 config watch_alert 篩好（data.watch_hits），這裡只負責：
+   1. 去重：同一檔、同一劇本，一天只提醒一次（記在 localStorage，重新整理頁面也不會重跳）
+   2. 跳出頁面彈窗；有按「啟用提醒」的話再加桌面通知與提示音
+      （瀏覽器規定：必須使用者點過一下，網頁才能發通知、播放聲音） */
+let alertEnabled = false;
+let alertsMuted = false;   // 啟用後再按一次取消：連頁面彈窗也一併關掉
+let audioCtx = null;
+const SEEN_KEY = "watchAlertSeen";
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+function loadSeen() {
+  try {
+    const v = JSON.parse(localStorage.getItem(SEEN_KEY) || "{}");
+    if (v.date === todayStr() && Array.isArray(v.keys)) return new Set(v.keys);
+  } catch (e) { /* 無法讀取就當作今天還沒提醒過 */ }
+  return new Set();
+}
+
+function saveSeen(seen) {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify({ date: todayStr(), keys: [...seen] }));
+  } catch (e) { /* 存不了只會影響重新整理後的去重，不影響提醒本身 */ }
+}
+
+let seen = loadSeen();
+
+function handleWatchHits(hits) {
+  if (!hits.length || alertsMuted) return;   // 取消提醒期間不彈窗、也不記入去重，重新啟用後仍會提醒目前符合的股票
+  // key 含日期，所以跨日後舊紀錄自然不會命中，隔天同一檔同一劇本會再提醒
+  const fresh = hits.filter(h => !seen.has(`${todayStr()}|${h.symbol}|${h.scenario}`));
+  if (!fresh.length) return;
+  fresh.forEach(h => seen.add(`${todayStr()}|${h.symbol}|${h.scenario}`));
+  saveSeen(seen);
+
+  showWatchModal(fresh);
+  if (alertEnabled) {
+    beep();
+    fresh.forEach(desktopNotify);
+  }
+}
+
+function showWatchModal(hits) {
+  const time = new Date().toLocaleTimeString();
+  const html = hits.map(h => {
+    const dir = h.direction === "short" ? "short" : "long";
+    return card(h, dir).replace('<span class="sym">',
+      `<span class="sym"><span class="time">${time}</span> `);
+  }).join("");
+  // 還沒按「知道了」前又有新的，就疊加在最上面，不蓋掉舊的
+  const list = document.getElementById("watch-list");
+  list.innerHTML = html + list.innerHTML;
+  document.getElementById("watch-modal").classList.add("show");
+  document.querySelector("#watch-modal .box").scrollTop = 0;  // 最新的在最上面，捲回頂端
+}
+
+function desktopNotify(h) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const pct = h.change_pct == null ? "" : `（${h.change_pct > 0 ? "+" : ""}${h.change_pct.toFixed(2)}%）`;
+  let n;
+  try {
+    n = new Notification(`🔔 ${h.symbol} ${h.name}：${h.scenario}`, {
+      body: `現價 ${h.price}${pct}\n分數 ${h.alert_score}　訊號 ${h.signals}`,
+      tag: `${h.symbol}|${h.scenario}`,
+      requireInteraction: true,   // 不自動消失，直到你點掉
+    });
+  } catch (e) {
+    return;  // Android Chrome 不支援 new Notification()，手機上靠彈窗＋提示音提醒
+  }
+  n.onclick = () => { window.focus(); n.close(); };
+}
+
+function beep() {
+  if (!audioCtx) return;
+  // 兩聲短促提示音，不需要音效檔
+  [0, 0.25].forEach(offset => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    const t = audioCtx.currentTime + offset;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.2);
+  });
+}
+
+document.getElementById("enable-alert").addEventListener("click", async () => {
+  const btn = document.getElementById("enable-alert");
+  const status = document.getElementById("alert-status");
+
+  // 已啟用時再按一次 = 取消提醒：停止彈窗、提示音與桌面通知
+  if (alertEnabled) {
+    alertEnabled = false;
+    alertsMuted = true;
+    document.getElementById("watch-modal").classList.remove("show");
+    document.getElementById("watch-list").innerHTML = "";
+    btn.textContent = "🔔 啟用提醒";
+    btn.classList.remove("on");
+    status.className = "warn";
+    status.textContent = "提醒已取消：不會再有彈窗、桌面通知和提示音。再按一下可重新啟用。";
+    return;
+  }
+
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    await audioCtx.resume();
+  } catch (e) { audioCtx = null; }
+
+  let perm = "unsupported";
+  if ("Notification" in window) {
+    perm = Notification.permission === "default"
+      ? await Notification.requestPermission()
+      : Notification.permission;
+  }
+
+  alertEnabled = true;
+  alertsMuted = false;
+  btn.textContent = "🔔 提醒已啟用（再按一次取消）";
+  btn.classList.add("on");
+  if (perm === "granted") {
+    status.className = "";
+    status.textContent = "桌面通知、頁面彈窗、提示音都已開啟。儀表板分頁請保持開著（可以縮小）。";
+  } else {
+    status.className = "warn";
+    status.textContent = "提示音與頁面彈窗已開啟，但桌面通知被瀏覽器封鎖：請點網址列左邊的圖示，把「通知」改成允許後重新整理。";
+  }
+  beep();  // 試聽一下，確認有聲音
+});
+
+document.getElementById("watch-ok").addEventListener("click", () => {
+  document.getElementById("watch-modal").classList.remove("show");
+  document.getElementById("watch-list").innerHTML = "";
+});
+
+loadWatchlist().then(refresh);
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
