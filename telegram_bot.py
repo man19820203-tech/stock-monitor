@@ -122,9 +122,20 @@ class TelegramBot:
         return ok
 
     # ---------- Telegram API ----------
-    def _call(self, method: str, timeout: float = 15, **params) -> dict:
-        resp = self._session.post(_API.format(token=self.token, method=method),
-                                  json=params, timeout=timeout)
+    def _call(self, method: str, timeout: float = 15, retries: int = 3, **params) -> dict:
+        """每次開新連線、失敗重試。不共用 self._session：GitHub Actions 的機器會悄悄切斷閒置幾分鐘的連線，
+        重用舊連線送出的訊息會卡到逾時才失敗（實測收盤訊息就是這樣送不出去）。
+        _session 只給 _get_updates 用，它每 25 秒一輪不會閒置。"""
+        for attempt in range(1, retries + 1):
+            try:
+                resp = requests.post(_API.format(token=self.token, method=method),
+                                     json=params, timeout=timeout)
+                break
+            except requests.RequestException as e:
+                if attempt == retries:
+                    raise
+                print(f"[Telegram] {method} 連線失敗，重試第 {attempt} 次: {e}")
+                time.sleep(2 * attempt)
         data = resp.json()
         if not data.get("ok"):
             print(f"[Telegram] {method} 失敗: {data.get('description')}")

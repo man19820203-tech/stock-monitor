@@ -85,8 +85,9 @@ def main() -> int:
     if bot:
         bot.stop_at = stop_at
         bot.start()
-        bot.send(f"🟢 盤中監控已啟動（{now_tw():%m/%d %H:%M}），{stop_at:%H:%M} 自動結束\n"
-                 "輸入 /help 看指令")
+        ok = bot.send(f"🟢 盤中監控已啟動（{now_tw():%m/%d %H:%M}），{stop_at:%H:%M} 自動結束\n"
+                      "輸入 /help 看指令")
+        print(f"[cloud_run] Telegram 啟動通知{'已送出' if ok else '送出失敗'}")
     print(f"[cloud_run] 執行中，{stop_at:%H:%M} 自動結束")
 
     while now_tw() < stop_at:
@@ -97,7 +98,8 @@ def main() -> int:
             summary = bot.top_text()
         except Exception as e:
             summary = f"（排名產生失敗：{e}）"
-        bot.send(f"🔴 盤中監控結束，今天推播 {bot.alert_count} 則提醒\n\n{summary}")
+        ok = bot.send(f"🔴 盤中監控結束，今天推播 {bot.alert_count} 則提醒\n\n{summary}")
+        print(f"[cloud_run] Telegram 結束通知{'已送出' if ok else '送出失敗'}")
         bot.stop()
     try:
         orch.ds.disconnect()
