@@ -104,6 +104,22 @@ assert "系統狀態" in fake.sent[-1][1]
 bot._handle_message(msg("/xyz"))
 assert "/help" in fake.sent[-1][1]
 
+# 3b. 劇本方向跟欄位相反要加註；族群只列上漲的，並標明是追蹤中族群
+from telegram_bot import _stock_line, _group_line
+assert "⚠️方向不一致" in _stock_line(row("X", "反彈空", "short", 55, 40), "long_score")
+assert "⚠️方向不一致" not in _stock_line(row("X", "強勢突破", "long", 85, 20), "long_score")
+assert "⚠️方向不一致" not in _stock_line(row("X", "無方向／禁止交易", None, 71, 20), "long_score")
+assert "⚠️方向不一致" in _stock_line(row("X", "V型反轉", "long", 30, 80), "short_score")
+g = lambda name, pct, n: {"group": name, "avg_change_pct": pct, "members": [{}] * n}
+line = _group_line([g("載板", 4.27, 1), g("被動元件", 3.63, 2), g("PCB", -3.23, 1)])
+assert "追蹤中強勢族群" in line and "載板 +4.27%（1檔）" in line and "PCB" not in line, line
+assert _group_line([g("PCB", -3.23, 1)]) == "", "全部下跌時不顯示強勢族群"
+state_store.remove("A")
+state_store.upsert("D", row("D", "反彈空", "short", 55, 40))
+bot._handle_message(msg("/top"))
+assert "⚠️方向不一致" in fake.sent[-1][1] and "代表方向不明確" in fake.sent[-1][1]
+state_store.remove("D")
+
 
 class FakeController:
     def __init__(self):

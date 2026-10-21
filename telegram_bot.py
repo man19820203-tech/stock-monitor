@@ -48,10 +48,31 @@ def _pct(v):
 
 
 def _stock_line(s: dict, score_key: str) -> str:
-    """排名用的一行摘要：代號 名稱 價格 漲跌 分數 劇本"""
+    """排名用的一行摘要：代號 名稱 價格 漲跌 分數 劇本。
+    放在哪一欄看多空分數哪個高，劇本是另一套規則判斷的，兩者可能相反（例如多方欄裡的「反彈空」），
+    這時加註提醒，不然看起來像系統算錯。"""
+    column = "long" if score_key == "long_score" else "short"
+    direction = s.get("direction")
+    conflict = " ⚠️方向不一致" if direction in ("long", "short") and direction != column else ""
     return (f"<code>{s['symbol']}</code> {html.escape(str(s.get('name') or ''))} "
             f"{_num(s.get('price'))} ({_pct(s.get('change_pct'))}) "
-            f"<b>{s.get(score_key, 0)}</b>分｜{html.escape(str(s.get('scenario') or ''))}")
+            f"<b>{s.get(score_key, 0)}</b>分｜{html.escape(str(s.get('scenario') or ''))}{conflict}")
+
+
+def _with_conflict_note(lines: list) -> str:
+    if any("⚠️方向不一致" in line for line in lines):
+        lines.append("\n⚠️方向不一致：分數偏這一邊，但劇本判斷是另一邊，代表方向不明確")
+    return "\n".join(lines)
+
+
+def _group_line(groups: list, n: int = 3) -> str:
+    """族群強弱只用「追蹤中的股票」算（免費方案只追蹤 5 檔，一個族群常常只有 1 檔），
+    所以標明是追蹤中族群、附上檔數，而且只列上漲的，下跌的族群不叫強勢。"""
+    up = [g for g in groups if g["avg_change_pct"] > 0][:n]
+    if not up:
+        return ""
+    return "\n🔥 追蹤中強勢族群：" + "、".join(
+        f"{html.escape(g['group'])} {_pct(g['avg_change_pct'])}（{len(g['members'])}檔）" for g in up)
 
 
 def _stock_detail(s: dict, title: str = "") -> str:
@@ -238,11 +259,10 @@ class TelegramBot:
         lines += [_stock_line(s, "long_score") for s in data["long_top"][:n]] or ["（無）"]
         lines.append("\n📉 <b>空方</b>")
         lines += [_stock_line(s, "short_score") for s in data["short_top"][:n]] or ["（無）"]
-        if data["group_strength"]:
-            groups = data["group_strength"][:3]
-            lines.append("\n🔥 強勢族群：" + "、".join(
-                f"{html.escape(g['group'])} {_pct(g['avg_change_pct'])}" for g in groups))
-        return "\n".join(lines)
+        group_line = _group_line(data["group_strength"])
+        if group_line:
+            lines.append(group_line)
+        return _with_conflict_note(lines)
 
     def _cmd_list(self, _arg):
         rows = sorted(state_store.get_all().values(),
@@ -254,7 +274,7 @@ class TelegramBot:
         for s in rows:
             key = "long_score" if s["long_score"] >= s["short_score"] else "short_score"
             lines.append(("⭐" if s["symbol"] in pinned else "・") + _stock_line(s, key))
-        return "\n".join(lines)
+        return _with_conflict_note(lines)
 
     def _cmd_stock(self, arg):
         symbol = arg.strip().upper()
