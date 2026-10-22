@@ -7,6 +7,12 @@ on:
     # 週一到週五 00:23 UTC = 台北 08:23。GitHub 排程常延遲幾分鐘到半小時，所以提早觸發，
     # 程式會自己等到 config cloud.start_time（08:45）才開始；故意避開整點，整點排程最容易塞車
     - cron: "23 0 * * 1-5"
+    # 備援：GitHub 尖峰時段會直接漏掉排程（10/22 那次 08:23 完全沒有觸發）。
+    # 前一次還在跑的話，備援會被下面的 concurrency 排在後面，等前一次 13:35 結束後才開始，
+    # 那時已過結束時間，cloud_run.py 會直接結束，只多花不到 1 分鐘
+    - cron: "38 0 * * 1-5"    # 台北 08:38
+    - cron: "52 0 * * 1-5"    # 台北 08:52
+    - cron: "7 1 * * 1-5"     # 台北 09:07（前面都漏掉時的最後一道；第一高低會用 1 分K 補回）
   workflow_dispatch:
     inputs:
       minutes:
@@ -26,7 +32,7 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 345   # GitHub 單次上限 6 小時；08:23 觸發、13:35 結束約 5 小時 12 分
+    timeout-minutes: 345   # GitHub 單次上限 6 小時；08:23 觸發、13:35 結束約 5 小時 12 分（排隊等待的時間不算）
     steps:
       - uses: actions/checkout@v4
 
@@ -63,6 +69,7 @@ jobs:
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
           git add data/user_watchlist.json
           git commit -m "更新自選股（Telegram 指令）"
+          git pull --rebase   # 盤中有人改過 repo（例如在網頁上改設定）時，直接 push 會被拒
           git push
 
       - name: 保持排程啟用
