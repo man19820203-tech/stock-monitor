@@ -1,0 +1,62 @@
+# 準時啟動盤中監控（不需要任何外部服務或權杖）
+#
+# GitHub 內建排程在早上尖峰會嚴重延遲（10/22 08:23 的排程晚了 4 小時 41 分才觸發）。
+# 解法：凌晨排程比較不塞，所以凌晨先啟動這個小工作，它自己等到 08:25，
+# 再用 workflow_dispatch 啟動 monitor.yml。workflow_dispatch 是立即執行，不會被排程延遲影響。
+# 就算凌晨的排程也延遲了幾個小時，只要在 08:25 前跑起來就準時；晚於 08:25 也會馬上啟動。
+name: 準時啟動
+
+on:
+  schedule:
+    # 週日到週四 UTC = 台北週一到週五凌晨；兩個時間互為備援
+    - cron: "13 20 * * 0-4"   # 台北 04:13
+    - cron: "43 21 * * 0-4"   # 台北 05:43
+  workflow_dispatch:
+    inputs:
+      no_wait:
+        description: "測試用：不等 08:25，馬上啟動盤中監控"
+        type: boolean
+        default: false
+
+permissions:
+  actions: write   # 用內建的 GITHUB_TOKEN 啟動 monitor.yml，不需要另外建權杖
+
+# 兩個備援排程都跑起來時排隊執行，後面那個會看到監控已經啟動而略過
+concurrency:
+  group: launcher
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330   # 04:13 觸發等到 08:25 約 4 小時 12 分，單次上限 6 小時
+    steps:
+      - name: 等到台北 08:25
+        if: ${{ !inputs.no_wait }}
+        run: |
+          target=$(TZ=Asia/Taipei date -d "08:25" +%s)
+          now=$(date +%s)
+          if [ "$now" -lt "$target" ]; then
+            echo "等 $(( (target - now) / 60 )) 分鐘，到台北 08:25 再啟動"
+            sleep $(( target - now ))
+          else
+            echo "已經過了 08:25，馬上啟動"
+          fi
+
+      - name: 啟動盤中監控
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NO_WAIT: ${{ inputs.no_wait }}
+        run: |
+          if [ "$NO_WAIT" != "true" ] && [ "$(TZ=Asia/Taipei date +%H%M)" -ge 1330 ]; then
+            echo "已經收盤，今天不啟動"
+            exit 0
+          fi
+          active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow monitor.yml \
+                     --json status --jq '[.[] | select(.status != "completed")] | length')
+          if [ "$active" -gt 0 ]; then
+            echo "盤中監控已經在執行或排隊中，不重複啟動"
+            exit 0
+          fi
+          gh workflow run monitor.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "已啟動盤中監控"

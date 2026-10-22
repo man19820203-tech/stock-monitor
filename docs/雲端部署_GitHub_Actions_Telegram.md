@@ -89,56 +89,19 @@
 
 測試成功後就不用再管它，之後每個交易日早上會自動執行。
 
-## 五、準時觸發：cron-job.org（強烈建議）
+## 五、準時啟動（已自動設定好，不用做任何事）
 
-GitHub 內建排程在早上尖峰會嚴重延遲（實測 10/22 晚了 4 小時 41 分才觸發）。
-改由免費的 cron-job.org 每個交易日 08:30 準時呼叫 GitHub「啟動執行」，GitHub 自己的排程留著當備援
-（兩邊都觸發時會自動排隊，不會重複執行）。
+GitHub 內建排程在早上尖峰會嚴重延遲（實測 10/22 08:23 的排程晚了 4 小時 41 分才觸發）。
+所以另外有一個「準時啟動」workflow（`.github/workflows/launcher.yml`）：
 
-### 1. 建立只能啟動這個 repo 的 GitHub 權杖
+- 凌晨 04:13、05:43（排程比較不塞的時段）先啟動，自己等到 **08:25**，
+  再用「手動啟動」的方式啟動盤中監控。手動啟動是立即執行，不受排程延遲影響。
+- 凌晨的排程就算也延遲好幾個小時，只要在 08:25 前跑起來就準時；超過 08:25 才跑起來也會馬上啟動。
+- 監控已經在跑時不會重複啟動。使用 GitHub 內建的權限，不需要另外建權杖或註冊其他服務。
+- 原本盤中監控自己的排程（08:23 等）保留當最後備援。
 
-1. GitHub 右上角頭像 → **Settings** → 左側最下面 **Developer settings** →
-   **Personal access tokens** → **Fine-grained tokens** → **Generate new token**
-   （直接網址：https://github.com/settings/personal-access-tokens/new ）
-2. 填寫：
-   - **Token name**：`cron-job-stock-monitor`
-   - **Expiration**：選最長的選項（到期前 GitHub 會寄信提醒，到時重新產生一把貼到 cron-job.org 即可）
-   - **Repository access**：選 **Only select repositories** → 選 `stock-monitor`
-   - **Permissions** → **Repository permissions** → **Actions** 改成 **Read and write**（其他都不用動）
-3. 按 **Generate token**，複製那串 `github_pat_...`（只會顯示這一次）。
-   這把權杖只能啟動／查看這個 repo 的 Actions，不能改程式碼、不能碰其他 repo。
-
-### 2. 在 cron-job.org 建立排程
-
-1. 到 https://console.cron-job.org/signup 註冊並登入（免費）。
-2. **Create cronjob**，**COMMON** 分頁：
-   - **Title**：`盤中監控`
-   - **URL**：
-     ```
-     https://api.github.com/repos/man19820203-tech/stock-monitor/actions/workflows/monitor.yml/dispatches
-     ```
-   - **Execution schedule**：選 **Custom**，
-     Days of month：每天 ／ Days of week：**Mon–Fri** ／ Months：每月 ／ Hours：**8** ／ Minutes：**30**
-   - **Time zone**：`Asia/Taipei`（在排程下方或帳號設定裡）
-   - **Notify me when**：勾 **execution of the cronjob fails**（觸發失敗會寄信給你）
-3. **ADVANCED** 分頁：
-   - **Request method**：`POST`
-   - **Headers**（按 ADD 加三個）：
-
-     | Key | Value |
-     |---|---|
-     | `Authorization` | `Bearer github_pat_...`（Bearer、一個空格、剛剛複製的權杖） |
-     | `Accept` | `application/vnd.github+json` |
-     | `X-GitHub-Api-Version` | `2022-11-28` |
-
-   - **Request body**：
-     ```
-     {"ref":"main"}
-     ```
-4. 按 **TEST RUN** → **START TEST RUN**：回應狀態是 **204** 就成功了
-   （GitHub Actions 頁面會多一筆 `workflow_dispatch` 的執行，非盤中時間它會自己判斷今天時間已過而直接結束）。
-   回 401 = 權杖貼錯或少了 `Bearer `；403／404 = 權杖沒勾 Actions: Read and write 或沒選到 `stock-monitor`。
-5. 按 **CREATE** 儲存。
+想手動測試：Actions → **準時啟動** → Run workflow → 勾「不等 08:25」→ Run，
+盤中監控會馬上被啟動（收盤後測試的話它會自己判斷時間已過、直接結束）。
 
 ---
 
@@ -160,7 +123,7 @@ GitHub 內建排程在早上尖峰會嚴重延遲（實測 10/22 晚了 4 小時
 - **本機和雲端不要同時開**：兩邊用同一個 Bot Token 收訊息會互相搶（紀錄裡會看到 `Conflict`／409）。
   想在本機也用 Telegram，可以再跟 BotFather 建一個機器人，填在本機的 `config/secrets.yaml`。
 - **本機改程式前先同步**：雲端會把 `/add`、`/remove` 的自選股 commit 回 GitHub，本機要改東西前先執行 `git pull`。
-- **GitHub 排程會延遲，甚至整個漏掉**：尖峰時可能晚好幾個小時，所以主要靠第五步的 cron-job.org 準時觸發；
+- **GitHub 排程會延遲，甚至整個漏掉**：尖峰時可能晚好幾個小時，所以主要靠第五步的「準時啟動」；
   GitHub 自己在 08:23、08:38、08:52、09:07 的排程只當備援。程式會自己等到 08:45 才開始，
   已經有一次在跑時其他觸發會自動排隊、輪到時已過結束時間就直接結束，不會重複執行。
   **如果 09:15 還沒收到「🟢 盤中監控已啟動」**：到 Actions → 盤中監控 → Run workflow（分鐘數留空）手動啟動。
