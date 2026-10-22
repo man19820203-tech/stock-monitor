@@ -2,7 +2,8 @@
 Telegram 機器人：盤中主動推播關注提醒，並用指令查詢排名／個股／管理自選股。
 雲端（GitHub Actions）沒有網頁儀表板可看，手機就靠這個；本機跑 run_all.py 時也會一起啟動。
 
-    推播：符合 config watch_alert 條件（劇本 + 分數門檻）的股票，同一檔同一劇本一天只推一次
+    推播：符合 config watch_alert 條件（劇本 + 分數門檻）的股票，同一檔同一劇本一天只推一次；
+          另外盤中每 telegram.summary_interval_minutes 分鐘推一次排名摘要
     指令：/top /list /stock 2330 /add 2330 /remove 2330 /watch /mute /unmute /status /help
 
 機器人是「主動往外連」Telegram（long polling），不用開 port、不用固定 IP。
@@ -12,6 +13,7 @@ Telegram 機器人：盤中主動推播關注提醒，並用指令查詢排名�
 import html
 import threading
 import time
+from datetime import timedelta
 from typing import Optional
 
 import requests
@@ -24,6 +26,7 @@ from watch_alert import match_watch_alerts
 
 _API = "https://api.telegram.org/bot{token}/{method}"
 _MAX_LEN = 4000   # Telegram 單則上限 4096 字，留點餘裕
+_MARKET_CLOSE_MIN = 13 * 60 + 30   # 13:30 收盤（定時摘要只在盤中送）
 
 HELP_TEXT = (
     "<b>台股當沖監控 指令</b>\n"
@@ -33,7 +36,7 @@ HELP_TEXT = (
     "/add 2330 － 加入自選股（一定追蹤）\n"
     "/remove 2330 － 移除自選股\n"
     "/watch － 自選股清單\n"
-    "/mute ／ /unmute － 暫停／恢復今天的提醒推播\n"
+    "/mute ／ /unmute － 暫停／恢復今天的提醒和定時摘要\n"
     "/status － 系統狀態\n"
     "\n分數僅供排序參考，非買賣建議。"
 )
@@ -103,6 +106,8 @@ class TelegramBot:
         self._session = requests.Session()
         self._sent_alerts: set = set()     # (日期, 代號, 劇本)：同一檔同一劇本一天只推一次
         self._muted_on = None              # /mute 的日期，隔天自動恢復
+        self._last_summary_slot = None     # (日期, 第幾個時段)：定時摘要每個時段只送一次
+        self._first_summary_check = None   # 第一次檢查定時摘要的時間（≈啟動時間）
         self.alert_count = 0
         self.stop_at = None                # cloud_run.py 設定的自動結束時間，/status 顯示用
 
@@ -200,9 +205,36 @@ class TelegramBot:
         while not self._stop.is_set():
             try:
                 self._push_watch_alerts()
+                self._push_summary()
             except Exception as e:
                 print(f"[Telegram] 推播檢查失敗: {e}")
             self._stop.wait(get("display.refresh_sec", 3))
+
+    def _push_summary(self):
+        """盤中定時推一次排名摘要（預設每 30 分鐘：09:30、10:00…13:00），讓你知道系統還活著。
+        對齊整點／半點，只在每個時段開頭 5 分鐘內送；中途才啟動的話等下一個時段，不會跟啟動通知擠在一起。
+        13:30 收盤那次不送，結束時的收盤摘要已經有。"""
+        interval = get("telegram.summary_interval_minutes", 30) or 0
+        if interval <= 0:
+            return
+        now = now_tw()
+        if self._first_summary_check is None:
+            self._first_summary_check = now
+        if self._muted_on == now.date():
+            return
+        h, m = map(int, str(get("first_range.start_time", "09:00")).split(":"))
+        minutes = now.hour * 60 + now.minute - (h * 60 + m)
+        if minutes < interval or now.hour * 60 + now.minute >= _MARKET_CLOSE_MIN or minutes % interval >= 5:
+            return
+        slot = (now.date(), minutes // interval)
+        if slot == self._last_summary_slot:
+            return
+        slot_start = now.replace(second=0, microsecond=0) - timedelta(minutes=minutes % interval)
+        if self._first_summary_check > slot_start:
+            self._last_summary_slot = slot   # 這個時段開始後才啟動（剛送過啟動通知），跳過等下一個
+            return
+        self._last_summary_slot = slot
+        self.send(f"⏱ <b>盤中摘要 {now:%H:%M}</b>（今天已推播 {self.alert_count} 則提醒）\n\n{self.top_text()}")
 
     def _push_watch_alerts(self):
         load_config(force_reload=True)   # 跟儀表板一樣，改設定檔不用重開
@@ -312,7 +344,7 @@ class TelegramBot:
 
     def _cmd_mute(self, _arg):
         self._muted_on = now_tw().date()
-        return "🔕 今天的提醒推播已暫停，明天自動恢復（/unmute 立即恢復）"
+        return "🔕 今天的提醒和定時摘要已暫停，明天自動恢復（/unmute 立即恢復）"
 
     def _cmd_unmute(self, _arg):
         self._muted_on = None

@@ -162,6 +162,7 @@ telegram:
   enabled: true
   push_watch_alerts: true          # 符合 watch_alert 條件時主動推播
   top_n: 5                         # /top 指令多方、空方各列幾檔
+  summary_interval_minutes: 30     # 盤中每幾分鐘推一次排名摘要（從開盤算起：09:30、10:00…13:00）；0 = 不推
 
 # ---------- 雲端執行（GitHub Actions，cloud_run.py）----------
 # workflow 會提早啟動（GitHub 排程常延遲），程式等到 start_time 才開始連線，stop_time 自動結束。

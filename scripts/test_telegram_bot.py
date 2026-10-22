@@ -120,6 +120,39 @@ bot._handle_message(msg("/top"))
 assert "⚠️方向不一致" in fake.sent[-1][1] and "代表方向不明確" in fake.sent[-1][1]
 state_store.remove("D")
 
+# 3c. 定時摘要：每 30 分鐘一次、只在時段開頭 5 分鐘內送、同一時段不重送、盤前／13:30 後／靜音不送
+import telegram_bot
+from datetime import datetime
+from market_time import TW_TZ
+
+real_now = telegram_bot.now_tw
+clock = {"t": None}
+telegram_bot.now_tw = lambda: clock["t"]
+
+
+def summaries_at(*hhmm):
+    bot, fake = make_bot()
+    for t in hhmm:
+        h, m = map(int, t.split(":"))
+        clock["t"] = datetime(2026, 10, 22, h, m, tzinfo=TW_TZ)
+        bot._push_summary()
+    return [text for _, text in fake.sent], bot
+
+
+sent, _ = summaries_at("08:50", "09:05", "09:29", "09:30", "09:31", "09:34", "09:36", "10:00")
+assert len(sent) == 2 and "盤中摘要 09:30" in sent[0] and "盤中摘要 10:00" in sent[1], sent
+sent, _ = summaries_at("11:02", "11:10", "11:30")          # 中途啟動：等下一個時段
+assert len(sent) == 1 and "11:30" in sent[0], sent
+sent, _ = summaries_at("13:00", "13:30", "13:31")          # 13:30 收盤那次不送
+assert len(sent) == 1 and "13:00" in sent[0], sent
+bot, fake = make_bot()
+bot._handle_message(msg("/mute"))
+fake.sent.clear()
+clock["t"] = datetime(2026, 10, 22, 10, 30, tzinfo=TW_TZ)
+bot._push_summary()
+assert fake.sent == [], "靜音時不送定時摘要"
+telegram_bot.now_tw = real_now
+
 
 class FakeController:
     def __init__(self):
